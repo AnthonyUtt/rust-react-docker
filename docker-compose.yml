@@ -1,0 +1,87 @@
+version: "3"
+
+volumes:
+  example_postgres:
+    external: true
+
+services:
+  postgres_db:
+    container_name: "${PROJECT_NAME}_postgres_db"
+    image: postgres:15.2-alpine
+    restart: always
+    volumes:
+      - example_postgres:/var/lib/postgresql/data:delegated
+    ports:
+      - ${POSTGRES_PORT}:${POSTGRES_PORT}
+    networks:
+      - server-side
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+
+  memcached:
+    container_name: "${PROJECT_NAME}_memcached"
+    image: memcached:latest
+    ports:
+      - 11211:11211
+    command:
+      - '--memory-limit=1024'
+    networks:
+      - memcached
+
+  backend:
+    container_name: "${PROJECT_NAME}_backend"
+    restart: always
+    build:
+      context: backend
+      args:
+        PORT: ${API_PORT}
+    environment:
+      - PORT=${API_PORT}
+      - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}/${POSTGRES_DB}
+      - SCCACHE_MEMCACHED=tcp://memcached:11211
+    ports:
+      - ${API_PORT}:${API_PORT}
+    networks:
+      - client-side
+      - server-side
+      - memcached
+    volumes:
+      - ./backend:/usr/src/app
+    depends_on:
+      - postgres_db
+      - memcached
+
+  frontend:
+    container_name: "${PROJECT_NAME}_frontend"
+    restart: always
+    build:
+      context: frontend
+      args:
+        PORT: ${FRONTEND_PORT}
+    ports:
+      - ${FRONTEND_PORT}:${FRONTEND_PORT}
+    networks:
+      - client-side
+    volumes:
+      - ./frontend:/usr/src/app
+
+  nginx:
+    image: nginx
+    container_name: "${PROJECT_NAME}_proxy"
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - client-side
+      - server-side
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/ssl:/etc/nginx/ssl
+
+networks:
+  client-side: {}
+  server-side: {}
+  memcached: {}
